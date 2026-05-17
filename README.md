@@ -11,6 +11,7 @@
 - 🎙️ Transcribes teacher speech every 30 seconds (OpenAI Whisper)
 - 📊 Shows everything on a live React dashboard
 - 📡 Anyone on the same WiFi can open the dashboard on their phone
+- 🎬 Supports both live webcam tracking and pre-recorded video uploads directly from the dashboard
 
 ## Tech Stack
 
@@ -46,17 +47,22 @@ That's it. Setup only needs to be done once.
 
 ## Running the System
 
+**Live Session (Camera Required)**
 Double-click `START.bat`
+* Starts the AI vision pipeline and live dashboard.
+* Open your browser and go to: `http://localhost:8000`
+* To share with others on the same WiFi, use the IP link printed in the terminal.
 
-Then open your browser and go to:
-http://localhost:8000
-
-To share with others on the same WiFi, use the IP link printed in the terminal.
+**Session Analysis (Offline Mode)**
+Double-click `DASHBOARD.bat`
+* Starts only the backend and dashboard to view past session data. No camera or AI pipeline runs.
+* Open your browser and navigate to the **Session Analysis** tab.
 
 ## Demo Guide
 
 | Action | What Happens |
 |---|---|
+| **Click "Upload Video"** | Switches pipeline from live webcam to pre-recorded video file |
 | Look at camera | Focus score goes up (green) |
 | Look away | Focus score drops (red) |
 | Raise hand | HAND RAISED alert on dashboard |
@@ -78,8 +84,10 @@ ByteHack_AI/
 ├── dashboard/       ← React frontend
 ├── start.py         ← Main launcher
 ├── setup.bat        ← First time setup
-└── START.bat        ← Run the system
+├── START.bat        ← Run the live system
+└── DASHBOARD.bat    ← View past sessions (no camera needed)
 ```
+
 ## Screenshots
 
 > Dashboard screenshots and demo video coming soon.
