@@ -25,8 +25,7 @@ python -m venv .venv
 
 echo [4/6] Installing Python libraries (this takes 3-5 minutes)...
 call .venv\Scripts\activate.bat
-pip install ultralytics mediapipe openai-whisper sounddevice scipy fastapi uvicorn opencv-contrib-python aiofiles numpy torch torchvision
-
+pip install ultralytics mediapipe openai-whisper sounddevice scipy fastapi uvicorn opencv-contrib-python aiofiles numpy torch torchvision python-multipart
 echo [5/6] Downloading AI models...
 python -c "import whisper; whisper.load_model('tiny')"
 python -c "import urllib.request; urllib.request.urlretrieve('https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task', 'face_landmarker.task'); print('Face model downloaded')"
