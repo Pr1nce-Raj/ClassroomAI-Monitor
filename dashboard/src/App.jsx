@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import axios from "axios"
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -43,11 +43,113 @@ function Badge({ text, color }) {
   )
 }
 
+// ── Video Upload Button ────────────────────────────────────────────
+function VideoSourceButton() {
+  const [config, setConfig]       = useState({ video_mode: false, filename: null })
+  const [uploading, setUploading] = useState(false)
+  const [status, setStatus]       = useState(null)   // "ok" | "error" | null
+  const fileRef = useRef()
+
+  // Poll config so the button reflects current state
+  useEffect(() => {
+    const fetch = () =>
+      axios.get(`${API}/video_config`)
+        .then(r => setConfig(r.data))
+        .catch(() => {})
+    fetch()
+    const id = setInterval(fetch, 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    setUploading(true)
+    setStatus(null)
+    try {
+      const form = new FormData()
+      form.append("file", file)
+      await axios.post(`${API}/video_config/upload`, form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      })
+      setConfig({ video_mode: true, filename: file.name })
+      setStatus("ok")
+    } catch {
+      setStatus("error")
+    } finally {
+      setUploading(false)
+      // Reset input so same file can be re-uploaded
+      if (fileRef.current) fileRef.current.value = ""
+    }
+  }
+
+  const switchToCamera = async () => {
+    await axios.post(`${API}/video_config/use_camera`).catch(() => {})
+    setConfig({ video_mode: false, filename: null })
+    setStatus(null)
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {config.video_mode ? (
+        <>
+          <div style={{
+            background: "#EF9F2722", border: "1px solid #EF9F27",
+            color: "#EF9F27", borderRadius: 8, padding: "5px 12px",
+            fontSize: 11, fontWeight: 600, maxWidth: 180,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"
+          }}>
+            🎬 {config.filename ?? "Video mode"}
+          </div>
+          <button
+            onClick={switchToCamera}
+            title="Switch back to live webcam"
+            style={{
+              background: "#1a2a4a", border: "1px solid #2a3a5a",
+              color: "#888", borderRadius: 8, padding: "5px 12px",
+              fontSize: 11, cursor: "pointer"
+            }}
+          >📷 Use Camera</button>
+        </>
+      ) : (
+        <>
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            style={{
+              background: uploading ? "#1a2a4a" : "#16213e",
+              border: "1px solid #2a3a5a",
+              color: uploading ? "#555" : "#888",
+              borderRadius: 8, padding: "5px 14px",
+              fontSize: 11, cursor: uploading ? "not-allowed" : "pointer"
+            }}
+          >
+            {uploading ? "⏳ Uploading..." : "🎬 Upload Video"}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="video/*"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+        </>
+      )}
+      {status === "ok" && (
+        <span style={{ fontSize: 11, color: "#1D9E75" }}>✓ Ready — restart Python to apply</span>
+      )}
+      {status === "error" && (
+        <span style={{ fontSize: 11, color: "#E24B4A" }}>✗ Upload failed</span>
+      )}
+    </div>
+  )
+}
+
 function LiveTab({ sessionId }) {
-  const [live, setLive] = useState(null)
-  const [alerts, setAlerts] = useState([])
-  const [transcripts, setTrans] = useState([])
-  const [timeline, setTimeline] = useState([])
+  const [live, setLive]           = useState(null)
+  const [alerts, setAlerts]       = useState([])
+  const [transcripts, setTrans]   = useState([])
+  const [timeline, setTimeline]   = useState([])
 
   useEffect(() => {
     if (!sessionId) return
@@ -63,7 +165,7 @@ function LiveTab({ sessionId }) {
         setAlerts(alR.data.slice(0, 20))
         setTrans(trR.data.slice(0, 5))
         setTimeline(tlR.data.map((r, i) => ({ t: i + 1, focus: r.avg_focus })))
-      } catch (e) { }
+      } catch (e) {}
     }
     poll()
     const id = setInterval(poll, 5000)
@@ -73,9 +175,12 @@ function LiveTab({ sessionId }) {
   if (!sessionId) return (
     <div style={{ color: "#555", textAlign: "center", padding: 80, fontSize: 14 }}>
       <div style={{ fontSize: 32, marginBottom: 16 }}>⏳</div>
-      <div>Waiting for Python pipeline to start...</div>
+      <div>No active session — Python pipeline is not running.</div>
       <div style={{ fontSize: 12, marginTop: 8, color: "#444" }}>
-        Run <code style={{ background: "#1a1a2e", padding: "2px 6px", borderRadius: 4 }}>python start.py</code> to begin
+        Run <code style={{ background: "#1a1a2e", padding: "2px 6px", borderRadius: 4 }}>python start.py</code> to begin a live session.
+      </div>
+      <div style={{ fontSize: 12, marginTop: 6, color: "#444" }}>
+        To review past sessions, switch to the <strong style={{ color: "#888" }}>Session Analysis</strong> tab.
       </div>
     </div>
   )
@@ -152,13 +257,13 @@ function LiveTab({ sessionId }) {
 }
 
 function AnalysisTab() {
-  const [sessions, setSessions] = useState([])
-  const [selected, setSelected] = useState(null)
-  const [summary, setSummary] = useState(null)
-  const [timeline, setTimeline] = useState([])
+  const [sessions, setSessions]   = useState([])
+  const [selected, setSelected]   = useState(null)
+  const [summary, setSummary]     = useState(null)
+  const [timeline, setTimeline]   = useState([])
   const [allEvents, setAllEvents] = useState([])
-  const [transcripts, setTrans] = useState([])
-  const [filter, setFilter] = useState("all")
+  const [transcripts, setTrans]   = useState([])
+  const [filter, setFilter]       = useState("all")
 
   useEffect(() => {
     axios.get(`${API}/sessions/all`).then(r => setSessions(r.data))
@@ -185,8 +290,8 @@ function AnalysisTab() {
 
   const filteredEvents = allEvents.filter(e => {
     if (filter === "alerts") return e.hand_raised || e.sleeping || e.phone_detected
-    if (filter === "hand") return e.hand_raised
-    if (filter === "phone") return e.phone_detected
+    if (filter === "hand")   return e.hand_raised
+    if (filter === "phone")  return e.phone_detected
     return true
   })
 
@@ -292,11 +397,11 @@ function AnalysisTab() {
 }
 
 export default function App() {
-  const [tab, setTab] = useState("live")
-  const [sessionId, setSession] = useState(null)
+  const [tab, setTab]               = useState("live")
+  const [sessionId, setSession]     = useState(null)
   const [sessionLabel, setSessionLabel] = useState(null)
-  const [editing, setEditing] = useState(false)
-  const [editForm, setEditForm] = useState({ class: "", course: "", teacher: "" })
+  const [editing, setEditing]       = useState(false)
+  const [editForm, setEditForm]     = useState({ class: "", course: "", teacher: "" })
 
   useEffect(() => {
     const check = async () => {
@@ -309,7 +414,7 @@ export default function App() {
           if (info.data && info.data.label) {
             const raw = info.data.label
             setSessionLabel(raw)
-            const parts = raw.split(" | ")
+            const parts      = raw.split(" | ")
             const coursePart = parts[0] || ""
             const teacherPart = parts[1] || ""
             const courseSplit = coursePart.split(" - ")
@@ -323,7 +428,7 @@ export default function App() {
           setSession(null)
           setSessionLabel(null)
         }
-      } catch (e) { }
+      } catch (e) {}
     }
     check()
     const id = setInterval(check, 3000)
@@ -340,14 +445,20 @@ export default function App() {
     <div style={{ minHeight: "100vh", background: "#0f0f1a", color: "#e0e0e0", fontFamily: "system-ui, sans-serif" }}>
 
       {/* Header */}
-      <div style={{ background: "#16213e", borderBottom: "1px solid #1a2a4a", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ background: "#16213e", borderBottom: "1px solid #1a2a4a", padding: "16px 32px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
         <div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#fff" }}>ClassroomAI Monitor</div>
           <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>
             {sessionLabel ? sessionLabel : "AI-powered classroom engagement system · BYTEHACK 2026"}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+
+          {/* Video source selector — always visible */}
+          <VideoSourceButton />
+
+          {/* Edit info — only when session is live */}
           {sessionId && (
             <button onClick={() => setEditing(!editing)} style={{
               background: "#1a2a4a", border: "1px solid #2a3a5a",
@@ -355,6 +466,8 @@ export default function App() {
               fontSize: 11, cursor: "pointer"
             }}>✏️ Edit Info</button>
           )}
+
+          {/* Live / Offline badge */}
           {sessionId ? (
             <div style={{ background: "#1D9E7522", border: "1px solid #1D9E75", color: "#1D9E75", borderRadius: 20, padding: "4px 14px", fontSize: 11, fontWeight: 600 }}>
               ● LIVE · Session {sessionId}
@@ -371,9 +484,9 @@ export default function App() {
       {editing && sessionId && (
         <div style={{ background: "#16213e", borderBottom: "1px solid #1a2a4a", padding: "16px 32px", display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
           {[
-            { key: "course", label: "COURSE", placeholder: "e.g. CS301" },
-            { key: "class", label: "CLASS / ROOM", placeholder: "e.g. Lecture Hall B" },
-            { key: "teacher", label: "TEACHER NAME", placeholder: "e.g. Prof. Ahmed" },
+            { key: "course",  label: "COURSE",       placeholder: "e.g. CS301" },
+            { key: "class",   label: "CLASS / ROOM",  placeholder: "e.g. Lecture Hall B" },
+            { key: "teacher", label: "TEACHER NAME",  placeholder: "e.g. Prof. Ahmed" },
           ].map(f => (
             <div key={f.key}>
               <div style={{ fontSize: 10, color: "#666", marginBottom: 4 }}>{f.label}</div>
@@ -403,11 +516,11 @@ export default function App() {
 
       <div style={{ padding: "24px 32px" }}>
         <div style={{ display: "flex", borderBottom: "1px solid #1a2a4a", marginBottom: 24, gap: 4 }}>
-          <button style={tabBtn(tab === "live")} onClick={() => setTab("live")}>Live Monitor</button>
+          <button style={tabBtn(tab === "live")}     onClick={() => setTab("live")}>Live Monitor</button>
           <button style={tabBtn(tab === "analysis")} onClick={() => setTab("analysis")}>Session Analysis</button>
         </div>
 
-        {tab === "live" && <LiveTab sessionId={sessionId} />}
+        {tab === "live"     && <LiveTab sessionId={sessionId} />}
         {tab === "analysis" && <AnalysisTab />}
       </div>
     </div>

@@ -1,11 +1,11 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import sqlite3
+import sqlite3, json, shutil
 from database.db import DB_PATH, get_session_summary
 from datetime import datetime
 
@@ -18,6 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Path helpers ───────────────────────────────────────────────────
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VIDEO_CONFIG_PATH = os.path.join(ROOT, "video_config.json")
+UPLOADS_DIR       = os.path.join(ROOT, "uploaded_videos")
+os.makedirs(UPLOADS_DIR, exist_ok=True)
+
 def query(sql, params=()):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -25,6 +31,8 @@ def query(sql, params=()):
     conn.close()
     return [dict(r) for r in rows]
 
+
+# ── Session endpoints ──────────────────────────────────────────────
 
 @app.get("/sessions")
 def get_sessions():
@@ -108,7 +116,6 @@ def live_status(session_id: int):
     sleeping    = sum(r["sleeping"]        for r in rows)
     phones      = sum(r.get("phone_detected", 0) for r in rows)
 
-    # Get actual distinct person count from the latest timestamp
     latest_ts = rows[0]["timestamp"]
     latest_rows = query("""
         SELECT COUNT(DISTINCT person_index) as cnt
@@ -154,7 +161,7 @@ def get_transcripts(session_id: int):
 @app.get("/active_session")
 def get_active_session():
     try:
-        with open("active_session.txt", "r") as f:
+        with open(os.path.join(ROOT, "active_session.txt"), "r") as f:
             session_id = int(f.read().strip())
         return {"session_id": session_id, "active": True}
     except FileNotFoundError:
@@ -173,12 +180,59 @@ def update_session(session_id: int, label: str, teacher: str):
     return {"status": "updated"}
 
 
+# ── Video config endpoints ─────────────────────────────────────────
+
+@app.get("/video_config")
+def get_video_config():
+    """Returns current video mode setting so dashboard can show status."""
+    try:
+        with open(VIDEO_CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"video_mode": False, "video_path": None, "filename": None}
+
+
+@app.post("/video_config/upload")
+async def upload_video(file: UploadFile = File(...)):
+    """
+    Accepts a video file upload from the dashboard.
+    Saves it to uploaded_videos/ and writes video_config.json
+    so detect.py picks it up on next run.
+    """
+    # Sanitise filename
+    safe_name = os.path.basename(file.filename).replace(" ", "_")
+    save_path = os.path.join(UPLOADS_DIR, safe_name)
+
+    with open(save_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    config = {
+        "video_mode": True,
+        "video_path": save_path,
+        "filename":   safe_name,
+    }
+    with open(VIDEO_CONFIG_PATH, "w") as f:
+        json.dump(config, f)
+
+    return {"status": "ok", "filename": safe_name, "path": save_path}
+
+
+@app.post("/video_config/use_camera")
+def use_camera():
+    """Switch back to live webcam mode."""
+    config = {"video_mode": False, "video_path": None, "filename": None}
+    with open(VIDEO_CONFIG_PATH, "w") as f:
+        json.dump(config, f)
+    return {"status": "ok", "video_mode": False}
+
+
+# ── Static files & SPA ────────────────────────────────────────────
+
+DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dashboard", "dist")
+
 @app.get("/")
 async def root():
     return FileResponse(os.path.join(DIST, "index.html"))
-
-
-DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dashboard", "dist")
 
 app.mount("/assets", StaticFiles(directory=os.path.join(DIST, "assets")), name="assets")
 

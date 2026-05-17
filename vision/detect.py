@@ -2,6 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
+import json
 import time
 import threading
 from ultralytics import YOLO
@@ -10,38 +11,71 @@ from vision.pose     import analyze_pose
 from database.db     import init_db, start_session, end_session, save_event
 from audio.listen    import run_audio_pipeline
 
-# ── Setup ─────────────────────────────────────────────────────────
-init_db()
-import time as _time
+# ── Read video config written by the dashboard ─────────────────────
+ROOT             = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VIDEO_CONFIG_PATH = os.path.join(ROOT, "video_config.json")
 
-# Wait for dashboard to create session first (up to 30 seconds)
+def load_video_config():
+    try:
+        with open(VIDEO_CONFIG_PATH, "r") as f:
+            cfg = json.load(f)
+        return cfg.get("video_mode", False), cfg.get("video_path", None)
+    except FileNotFoundError:
+        return False, None
+
+VIDEO_MODE, VIDEO_PATH = load_video_config()
+
+if VIDEO_MODE:
+    print(f"[CONFIG] Video mode ON — source: {VIDEO_PATH}")
+else:
+    print("[CONFIG] Live camera mode.")
+
+# ── Setup ──────────────────────────────────────────────────────────
+init_db()
+
 def get_latest_session():
     session_id = start_session(label="CS301 - Lecture Hall B")
-    # Write active session ID to a file so dashboard can read it
-    with open("active_session.txt", "w") as f:
+    with open(os.path.join(ROOT, "active_session.txt"), "w") as f:
         f.write(str(session_id))
-    return session_id  # ← THIS LINE WAS MISSING
+    return session_id
 
 session_id = get_latest_session()
 
-# Start audio pipeline in background thread
-stop_audio   = threading.Event()
-audio_thread = threading.Thread(
-    target=run_audio_pipeline,
-    args=(session_id, stop_audio),
-    daemon=True
-)
-audio_thread.start()
+# Start audio pipeline in background thread (live mode only)
+stop_audio = threading.Event()
+if not VIDEO_MODE:
+    audio_thread = threading.Thread(
+        target=run_audio_pipeline,
+        args=(session_id, stop_audio),
+        daemon=True
+    )
+    audio_thread.start()
+    print("Audio pipeline started.")
+else:
+    print("Video mode — audio pipeline disabled.")
+    audio_thread = None
 
-# ── YOLO — detect BOTH persons (0) and phones (67) ────────────────
+# ── YOLO ───────────────────────────────────────────────────────────
 model = YOLO("yolov8n.pt")
-cap   = cv2.VideoCapture(0)
+
+# ── Open video source ──────────────────────────────────────────────
+if VIDEO_MODE:
+    if not VIDEO_PATH or not os.path.exists(VIDEO_PATH):
+        print(f"ERROR: Video file not found at: {VIDEO_PATH}")
+        print("Upload a video from the dashboard first, or switch back to camera mode.")
+        exit()
+    cap = cv2.VideoCapture(VIDEO_PATH)
+    print(f"Playing: {VIDEO_PATH}")
+else:
+    cap = cv2.VideoCapture(0)
+    print("Live camera mode.")
 
 if not cap.isOpened():
-    print("ERROR: Could not open webcam.")
+    print("ERROR: Could not open video source.")
     exit()
 
-print("Running. Press Q to quit.")
+SOURCE_LABEL = "VIDEO" if VIDEO_MODE else "LIVE"
+print("Running. Press Q to quit. Press R to restart video (video mode only).")
 
 event_log           = []
 last_save_time      = time.time()
@@ -60,95 +94,79 @@ def log_event(msg):
 
 
 def boxes_overlap(box1, box2, threshold=0.3):
-    """
-    Check if two bounding boxes overlap.
-    box1, box2 = (x1, y1, x2, y2)
-    Returns True if intersection area > threshold * smaller box area.
-    """
     x1 = max(box1[0], box2[0])
     y1 = max(box1[1], box2[1])
     x2 = min(box1[2], box2[2])
     y2 = min(box1[3], box2[3])
-
     if x2 <= x1 or y2 <= y1:
-        return False   # no overlap
-
+        return False
     intersection = (x2 - x1) * (y2 - y1)
     box2_area    = (box2[2] - box2[0]) * (box2[3] - box2[1])
-
     return intersection > threshold * box2_area
 
 
 while True:
     ret, frame = cap.read()
-    if not ret:
-        break
 
-    # Detect persons AND phones in one single YOLO pass
+    if not ret:
+        if VIDEO_MODE:
+            print("Video ended — looping back to start.")
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            continue
+        else:
+            print("Camera feed lost.")
+            break
+
     results = model(frame, classes=[0, 67], conf=0.45, verbose=False)
     boxes   = results[0].boxes
     now     = time.time()
 
-    # Separate person boxes and phone boxes
     person_boxes = []
     phone_boxes  = []
 
     for box in boxes:
-        cls = int(box.cls[0])
+        cls    = int(box.cls[0])
         coords = tuple(map(int, box.xyxy[0]))
         if cls == 0:
             person_boxes.append(coords)
         elif cls == 67:
             phone_boxes.append(coords)
-            # Draw phone box in red
             px1, py1, px2, py2 = coords
             cv2.rectangle(frame, (px1, py1), (px2, py2), (0, 0, 255), 2)
             cv2.putText(frame, "PHONE", (px1, py1 - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-    # Process each person
     for i, (x1, y1, x2, y2) in enumerate(person_boxes):
         crop = frame[y1:y2, x1:x2]
-
         if crop.shape[0] < 80 or crop.shape[1] < 40:
             continue
 
-        # ── Check if any phone overlaps this person ───────────────
         phone_detected = any(
-            boxes_overlap((x1, y1, x2, y2), pb)
-            for pb in phone_boxes
+            boxes_overlap((x1, y1, x2, y2), pb) for pb in phone_boxes
         )
 
-        # ── Focus score ───────────────────────────────────────────
         score, yaw, pitch = get_focus_score(crop)
 
-        # Apply phone penalty — reduce score by 30 points
         if phone_detected and score is not None:
             score = max(0, score - 30)
 
         if score is None:
-            colour = (150, 150, 150)
-            label  = "No face"
+            colour, label = (150, 150, 150), "No face"
         elif score >= 70:
-            colour = (0, 220, 100)
-            label  = f"Focus: {score}%"
+            colour, label = (0, 220, 100), f"Focus: {score}%"
         elif score >= 40:
-            colour = (0, 180, 255)
-            label  = f"Focus: {score}%"
+            colour, label = (0, 180, 255), f"Focus: {score}%"
         else:
-            colour = (0, 60, 220)
-            label  = f"Focus: {score}%"
+            colour, label = (0, 60, 220), f"Focus: {score}%"
 
-        # ── Phone override ────────────────────────────────────────
         if phone_detected:
-            colour = (0, 0, 255)       # bright red
+            colour = (0, 0, 255)
             label  = f"ON PHONE ({score}%)"
             last_log = last_phone_log.get(i, 0)
             if now - last_log >= PHONE_DEBOUNCE:
                 log_event(f"Phone detected — person {i+1}")
                 last_phone_log[i] = now
 
-        # ── Pose analysis ─────────────────────────────────────────
         pose        = analyze_pose(crop)
         hand_raised = False
         sleeping    = False
@@ -170,20 +188,18 @@ while True:
                 label  = "SLEEPING"
                 log_event(f"Sleeping — person {i+1}")
 
-        # ── Save to database every 5 seconds ──────────────────────
         if now - last_save_time >= SAVE_INTERVAL:
             save_event(
-                session_id    = session_id,
-                person_index  = i,
-                focus_score   = score,
-                yaw           = yaw,
-                pitch         = pitch,
-                hand_raised   = hand_raised,
-                sleeping      = sleeping,
-                phone_detected= phone_detected,
+                session_id     = session_id,
+                person_index   = i,
+                focus_score    = score,
+                yaw            = yaw,
+                pitch          = pitch,
+                hand_raised    = hand_raised,
+                sleeping       = sleeping,
+                phone_detected = phone_detected,
             )
 
-        # ── Draw person box and label ─────────────────────────────
         cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
         cv2.putText(frame, label, (x1, y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2)
@@ -193,16 +209,18 @@ while True:
                         (x1, y2 + 18),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (180, 180, 180), 1)
 
-    # Update save timer
     if now - last_save_time >= SAVE_INTERVAL:
         last_save_time = now
 
-    # ── Event log overlay ─────────────────────────────────────────
     for j, event in enumerate(reversed(event_log)):
         cv2.putText(frame, event, (10, 30 + j * 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 50), 1)
 
-    # ── Status bar ────────────────────────────────────────────────
+    src_color = (0, 165, 255) if VIDEO_MODE else (0, 220, 100)
+    cv2.putText(frame, f"● {SOURCE_LABEL}",
+                (frame.shape[1] - 100, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, src_color, 2)
+
     cv2.putText(
         frame,
         f"People: {len(person_boxes)}  Phones: {len(phone_boxes)}  Session: {session_id}",
@@ -211,15 +229,21 @@ while True:
     )
 
     cv2.imshow("ByteHack - Classroom Monitor", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
 
-# ── Cleanup ───────────────────────────────────────────────────────
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
+        break
+    elif key == ord('r') and VIDEO_MODE:
+        print("Restarting video...")
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
+# ── Cleanup ────────────────────────────────────────────────────────
 cap.release()
 cv2.destroyAllWindows()
 stop_audio.set()
-audio_thread.join(timeout=5)
-# Clear active session file
-if os.path.exists("active_session.txt"):
-    os.remove("active_session.txt")
+if audio_thread is not None:
+    audio_thread.join(timeout=5)
+active_path = os.path.join(ROOT, "active_session.txt")
+if os.path.exists(active_path):
+    os.remove(active_path)
 end_session(session_id)
