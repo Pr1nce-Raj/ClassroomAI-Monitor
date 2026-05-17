@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+classroom.db
+active_session.txt
+*.pt
+*.task
+dashboard/node_modules/
+dashboard/dist/
+.env
