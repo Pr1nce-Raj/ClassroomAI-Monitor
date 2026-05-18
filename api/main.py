@@ -137,7 +137,7 @@ def live_status(session_id: int):
 @app.get("/session/{session_id}/alerts")
 def get_alerts(session_id: int):
     return query("""
-        SELECT timestamp, person_index, focus_score,
+        SELECT timestamp, person_index, track_id, focus_score,
                hand_raised, sleeping,
                COALESCE(phone_detected, 0) AS phone_detected
         FROM events

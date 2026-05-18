@@ -286,7 +286,7 @@ function LiveTab({ sessionId }) {
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #1a2a4a", fontSize: 12 }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: alertColor(e), flexShrink: 0, display: "inline-block" }} />
                 <span style={{ color: "#555", minWidth: 70 }}>{e.timestamp.slice(11, 19)}</span>
-                <span style={{ color: "#ccc", flex: 1 }}>{alertLabel(e)} — Person {e.person_index + 1}</span>
+                <span style={{ color: "#ccc", flex: 1 }}>{alertLabel(e)} — Student {e.track_id !== -1 ? e.track_id : e.person_index + 1}</span>
                 <Badge text={`${e.focus_score ?? 0}%`} color={focusColor(e.focus_score)} />
               </div>
             ))
@@ -441,7 +441,7 @@ function AnalysisTab() {
                       background: e.phone_detected ? "#E24B4A" : e.hand_raised ? "#378ADD" : e.sleeping ? "#A32D2D" : focusColor(e.focus_score)
                     }} />
                     <span style={{ color: "#444", minWidth: 70 }}>{e.timestamp.slice(11, 19)}</span>
-                    <span style={{ color: "#888", minWidth: 60 }}>Person {e.person_index + 1}</span>
+                    <span style={{ color: "#888", minWidth: 60 }}>Student {e.track_id !== -1 ? e.track_id : e.person_index + 1}</span>
                     <span style={{ color: "#ccc", flex: 1 }}>
                       {e.phone_detected ? "On phone" : e.hand_raised ? "Hand raised" : e.sleeping ? "Sleeping" : `Focus ${e.focus_score}%`}
                     </span>
