@@ -9,3 +9,5 @@ active_session.txt
 dashboard/node_modules/
 dashboard/dist/
 .env
+uploaded_videos/
+video_config.json
