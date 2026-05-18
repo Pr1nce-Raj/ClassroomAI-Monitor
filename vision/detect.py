@@ -279,4 +279,19 @@ active_path = os.path.join(ROOT, "active_session.txt")
 if os.path.exists(active_path):
     os.remove(active_path)
 end_session(session_id)
+
+# Delete uploaded video and reset config after session ends
+if VIDEO_MODE and VIDEO_PATH and os.path.exists(VIDEO_PATH):
+    try:
+        os.remove(VIDEO_PATH)
+        print(f"Deleted uploaded video: {VIDEO_PATH}")
+    except Exception as e:
+        print(f"Could not delete video: {e}")
+
+# Reset video_config.json back to camera mode
+config = {"video_mode": False, "video_path": None, "filename": None}
+with open(VIDEO_CONFIG_PATH, "w") as f:
+    json.dump(config, f)
+print("Video config reset to camera mode.")
+
 print("Pipeline stopped cleanly.")
