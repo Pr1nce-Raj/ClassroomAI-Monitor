@@ -179,7 +179,6 @@ def update_session(session_id: int, label: str, teacher: str):
     conn.close()
     return {"status": "updated"}
 
-
 # ── Video config endpoints ─────────────────────────────────────────
 
 @app.get("/video_config")

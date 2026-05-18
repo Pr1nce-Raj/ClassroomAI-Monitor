@@ -43,14 +43,12 @@ function Badge({ text, color }) {
   )
 }
 
-// ── Video Upload Button ────────────────────────────────────────────
 function VideoSourceButton() {
   const [config, setConfig]       = useState({ video_mode: false, filename: null })
   const [uploading, setUploading] = useState(false)
-  const [status, setStatus]       = useState(null)   // "ok" | "error" | null
+  const [status, setStatus]       = useState(null)
   const fileRef = useRef()
 
-  // Poll config so the button reflects current state
   useEffect(() => {
     const fetch = () =>
       axios.get(`${API}/video_config`)
@@ -78,7 +76,6 @@ function VideoSourceButton() {
       setStatus("error")
     } finally {
       setUploading(false)
-      // Reset input so same file can be re-uploaded
       if (fileRef.current) fileRef.current.value = ""
     }
   }
@@ -146,10 +143,10 @@ function VideoSourceButton() {
 }
 
 function LiveTab({ sessionId }) {
-  const [live, setLive]           = useState(null)
-  const [alerts, setAlerts]       = useState([])
-  const [transcripts, setTrans]   = useState([])
-  const [timeline, setTimeline]   = useState([])
+  const [live, setLive]         = useState(null)
+  const [alerts, setAlerts]     = useState([])
+  const [transcripts, setTrans] = useState([])
+  const [timeline, setTimeline] = useState([])
 
   useEffect(() => {
     if (!sessionId) return
@@ -397,12 +394,25 @@ function AnalysisTab() {
 }
 
 export default function App() {
-  const [tab, setTab]               = useState("live")
-  const [sessionId, setSession]     = useState(null)
+  const [tab, setTab]                   = useState("live")
+  const [sessionId, setSession]         = useState(null)
   const [sessionLabel, setSessionLabel] = useState(null)
-  const [editing, setEditing]       = useState(false)
-  const [editForm, setEditForm]     = useState({ class: "", course: "", teacher: "" })
+  const [editing, setEditing]           = useState(false)
+  const [editForm, setEditForm]         = useState({ class: "", course: "", teacher: "" })
+  const savedLabel                      = useRef(null)
 
+  // Parse label string into form fields
+  const parseLabel = (raw) => {
+    const pipeIndex   = raw.lastIndexOf(" | ")
+    const coursePart  = pipeIndex !== -1 ? raw.slice(0, pipeIndex) : raw
+    const teacherPart = pipeIndex !== -1 ? raw.slice(pipeIndex + 3) : ""
+    const dashIndex   = coursePart.indexOf(" - ")
+    const course      = dashIndex !== -1 ? coursePart.slice(0, dashIndex).trim() : coursePart.trim()
+    const cls         = dashIndex !== -1 ? coursePart.slice(dashIndex + 3).trim() : ""
+    return { course, class: cls, teacher: teacherPart.trim() }
+  }
+
+  // Poll active session — NEVER touches editForm
   useEffect(() => {
     const check = async () => {
       try {
@@ -414,19 +424,12 @@ export default function App() {
           if (info.data && info.data.label) {
             const raw = info.data.label
             setSessionLabel(raw)
-            const parts      = raw.split(" | ")
-            const coursePart = parts[0] || ""
-            const teacherPart = parts[1] || ""
-            const courseSplit = coursePart.split(" - ")
-            setEditForm({
-              course:  courseSplit[0]?.trim() || "",
-              class:   courseSplit[1]?.trim() || "",
-              teacher: teacherPart.trim(),
-            })
+            savedLabel.current = raw
           }
         } else {
           setSession(null)
           setSessionLabel(null)
+          savedLabel.current = null
         }
       } catch (e) {}
     }
@@ -434,6 +437,14 @@ export default function App() {
     const id = setInterval(check, 3000)
     return () => clearInterval(id)
   }, [])
+
+  // Only populate editForm when user clicks Edit Info
+  const openEdit = () => {
+    if (savedLabel.current) {
+      setEditForm(parseLabel(savedLabel.current))
+    }
+    setEditing(true)
+  }
 
   const tabBtn = active => ({
     padding: "10px 24px", cursor: "pointer", fontSize: 13, fontWeight: 600,
@@ -454,20 +465,16 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-
-          {/* Video source selector — always visible */}
           <VideoSourceButton />
 
-          {/* Edit info — only when session is live */}
           {sessionId && (
-            <button onClick={() => setEditing(!editing)} style={{
+            <button onClick={openEdit} style={{
               background: "#1a2a4a", border: "1px solid #2a3a5a",
               color: "#888", borderRadius: 8, padding: "5px 14px",
               fontSize: 11, cursor: "pointer"
             }}>✏️ Edit Info</button>
           )}
 
-          {/* Live / Offline badge */}
           {sessionId ? (
             <div style={{ background: "#1D9E7522", border: "1px solid #1D9E75", color: "#1D9E75", borderRadius: 20, padding: "4px 14px", fontSize: 11, fontWeight: 600 }}>
               ● LIVE · Session {sessionId}
@@ -484,16 +491,16 @@ export default function App() {
       {editing && sessionId && (
         <div style={{ background: "#16213e", borderBottom: "1px solid #1a2a4a", padding: "16px 32px", display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
           {[
-            { key: "course",  label: "COURSE",       placeholder: "e.g. CS301" },
-            { key: "class",   label: "CLASS / ROOM",  placeholder: "e.g. Lecture Hall B" },
-            { key: "teacher", label: "TEACHER NAME",  placeholder: "e.g. Prof. Ahmed" },
+            { key: "course",  label: "COURSE",      placeholder: "e.g. CS301" },
+            { key: "class",   label: "CLASS / ROOM", placeholder: "e.g. Lecture Hall B" },
+            { key: "teacher", label: "TEACHER NAME", placeholder: "e.g. Prof. Ahmed" },
           ].map(f => (
             <div key={f.key}>
               <div style={{ fontSize: 10, color: "#666", marginBottom: 4 }}>{f.label}</div>
               <input
                 placeholder={f.placeholder}
                 value={editForm[f.key]}
-                onChange={e => setEditForm({ ...editForm, [f.key]: e.target.value })}
+                onChange={ev => setEditForm({ ...editForm, [f.key]: ev.target.value })}
                 style={{ background: "#0f0f1a", border: "1px solid #2a2a4a", borderRadius: 6, padding: "7px 12px", color: "#ccc", fontSize: 13, width: 180 }}
               />
             </div>
@@ -501,8 +508,12 @@ export default function App() {
           <button
             onClick={async () => {
               const label = `${editForm.course} - ${editForm.class}`
-              await axios.put(`${API}/session/${sessionId}/update?label=${encodeURIComponent(label)}&teacher=${encodeURIComponent(editForm.teacher)}`)
-              setSessionLabel(`${label} | ${editForm.teacher}`)
+              await axios.put(
+                `${API}/session/${sessionId}/update?label=${encodeURIComponent(label)}&teacher=${encodeURIComponent(editForm.teacher)}`
+              )
+              const newLabel = `${label} | ${editForm.teacher}`
+              setSessionLabel(newLabel)
+              savedLabel.current = newLabel
               setEditing(false)
             }}
             style={{ background: "#1D9E75", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
