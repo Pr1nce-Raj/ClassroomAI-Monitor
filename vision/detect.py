@@ -11,8 +11,7 @@ from vision.pose     import analyze_pose
 from database.db     import init_db, start_session, end_session, save_event
 from audio.listen    import run_audio_pipeline
 
-# ── Read video config written by the dashboard ─────────────────────
-ROOT             = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT              = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VIDEO_CONFIG_PATH = os.path.join(ROOT, "video_config.json")
 
 def load_video_config():
@@ -30,7 +29,6 @@ if VIDEO_MODE:
 else:
     print("[CONFIG] Live camera mode.")
 
-# ── Setup ──────────────────────────────────────────────────────────
 init_db()
 
 def get_latest_session():
@@ -41,7 +39,6 @@ def get_latest_session():
 
 session_id = get_latest_session()
 
-# Start audio pipeline in background thread (live mode only)
 stop_audio = threading.Event()
 if not VIDEO_MODE:
     audio_thread = threading.Thread(
@@ -55,14 +52,11 @@ else:
     print("Video mode — audio pipeline disabled.")
     audio_thread = None
 
-# ── YOLO ───────────────────────────────────────────────────────────
 model = YOLO("yolov8n.pt")
 
-# ── Open video source ──────────────────────────────────────────────
 if VIDEO_MODE:
     if not VIDEO_PATH or not os.path.exists(VIDEO_PATH):
         print(f"ERROR: Video file not found at: {VIDEO_PATH}")
-        print("Upload a video from the dashboard first, or switch back to camera mode.")
         exit()
     cap = cv2.VideoCapture(VIDEO_PATH)
     print(f"Playing: {VIDEO_PATH}")
@@ -117,18 +111,28 @@ while True:
             print("Camera feed lost.")
             break
 
-    results = model(frame, classes=[0, 67], conf=0.45, verbose=False)
-    boxes   = results[0].boxes
-    now     = time.time()
+    # Use ByteTrack for stable per-student IDs
+    results = model.track(
+        frame,
+        classes=[0, 67],
+        conf=0.45,
+        verbose=False,
+        persist=True,
+        tracker="bytetrack.yaml"
+    )
+    boxes = results[0].boxes
+    now   = time.time()
 
-    person_boxes = []
-    phone_boxes  = []
+    person_boxes = []  # (x1, y1, x2, y2, track_id)
+    phone_boxes  = []  # (x1, y1, x2, y2)
 
     for box in boxes:
         cls    = int(box.cls[0])
         coords = tuple(map(int, box.xyxy[0]))
+        tid    = int(box.id[0]) if box.id is not None else -1
+
         if cls == 0:
-            person_boxes.append(coords)
+            person_boxes.append((*coords, tid))
         elif cls == 67:
             phone_boxes.append(coords)
             px1, py1, px2, py2 = coords
@@ -136,7 +140,7 @@ while True:
             cv2.putText(frame, "PHONE", (px1, py1 - 6),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-    for i, (x1, y1, x2, y2) in enumerate(person_boxes):
+    for i, (x1, y1, x2, y2, track_id) in enumerate(person_boxes):
         crop = frame[y1:y2, x1:x2]
         if crop.shape[0] < 80 or crop.shape[1] < 40:
             continue
@@ -153,19 +157,19 @@ while True:
         if score is None:
             colour, label = (150, 150, 150), "No face"
         elif score >= 70:
-            colour, label = (0, 220, 100), f"Focus: {score}%"
+            colour, label = (0, 220, 100), f"S{track_id} Focus: {score}%"
         elif score >= 40:
-            colour, label = (0, 180, 255), f"Focus: {score}%"
+            colour, label = (0, 180, 255), f"S{track_id} Focus: {score}%"
         else:
-            colour, label = (0, 60, 220), f"Focus: {score}%"
+            colour, label = (0, 60, 220), f"S{track_id} Focus: {score}%"
 
         if phone_detected:
             colour = (0, 0, 255)
-            label  = f"ON PHONE ({score}%)"
-            last_log = last_phone_log.get(i, 0)
+            label  = f"S{track_id} ON PHONE ({score}%)"
+            last_log = last_phone_log.get(track_id, 0)
             if now - last_log >= PHONE_DEBOUNCE:
-                log_event(f"Phone detected — person {i+1}")
-                last_phone_log[i] = now
+                log_event(f"Phone detected — Student {track_id}")
+                last_phone_log[track_id] = now
 
         pose        = analyze_pose(crop)
         hand_raised = False
@@ -177,16 +181,16 @@ while True:
 
             if hand_raised and not phone_detected:
                 colour = (255, 200, 0)
-                label  = f"HAND RAISED ({pose['side']})"
-                last_log = last_hand_raise_log.get(i, 0)
+                label  = f"S{track_id} HAND RAISED ({pose['side']})"
+                last_log = last_hand_raise_log.get(track_id, 0)
                 if now - last_log >= HAND_RAISE_DEBOUNCE:
-                    log_event(f"Hand raise — person {i+1} ({pose['side']})")
-                    last_hand_raise_log[i] = now
+                    log_event(f"Hand raise — Student {track_id} ({pose['side']})")
+                    last_hand_raise_log[track_id] = now
 
             if sleeping:
                 colour = (0, 0, 200)
-                label  = "SLEEPING"
-                log_event(f"Sleeping — person {i+1}")
+                label  = f"S{track_id} SLEEPING"
+                log_event(f"Sleeping — Student {track_id}")
 
         if now - last_save_time >= SAVE_INTERVAL:
             save_event(
@@ -198,6 +202,7 @@ while True:
                 hand_raised    = hand_raised,
                 sleeping       = sleeping,
                 phone_detected = phone_detected,
+                track_id       = track_id,
             )
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
@@ -223,7 +228,7 @@ while True:
 
     cv2.putText(
         frame,
-        f"People: {len(person_boxes)}  Phones: {len(phone_boxes)}  Session: {session_id}",
+        f"Students: {len(person_boxes)}  Phones: {len(phone_boxes)}  Session: {session_id}",
         (10, frame.shape[0] - 10),
         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1
     )
@@ -237,7 +242,6 @@ while True:
         print("Restarting video...")
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-# ── Cleanup ────────────────────────────────────────────────────────
 cap.release()
 cv2.destroyAllWindows()
 stop_audio.set()

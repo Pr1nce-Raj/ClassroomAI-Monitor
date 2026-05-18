@@ -43,6 +43,68 @@ function Badge({ text, color }) {
   )
 }
 
+function StudentHeatmap({ sessionId }) {
+  const [students, setStudents] = useState([])
+
+  useEffect(() => {
+    if (!sessionId) return
+    const poll = () =>
+      axios.get(`${API}/session/${sessionId}/heatmap`)
+        .then(r => setStudents(r.data))
+        .catch(() => {})
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [sessionId])
+
+  if (students.length === 0) return (
+    <div style={{ background: "#16213e", border: "1px solid #1a2a4a", borderRadius: 10, padding: "40px 20px", textAlign: "center", color: "#444" }}>
+      Waiting for student tracking data...
+    </div>
+  )
+
+  return (
+    <div style={{ background: "#16213e", border: "1px solid #1a2a4a", borderRadius: 10, padding: "18px 20px" }}>
+      <div style={{ fontSize: 12, color: "#888", marginBottom: 16, fontWeight: 600 }}>
+        STUDENT FOCUS HEATMAP — {students.length} students tracked
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {students.map(s => {
+          const color = focusColor(s.avg_focus)
+          return (
+            <div key={s.track_id} style={{
+              background: color + "22",
+              border: `2px solid ${color}`,
+              borderRadius: 10,
+              padding: "12px 16px",
+              minWidth: 110,
+              position: "relative",
+            }}>
+              <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>
+                Student {s.track_id}
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color }}>
+                {s.avg_focus ?? "—"}%
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                {s.hand_raises > 0 && (
+                  <span style={{ fontSize: 10, color: "#378ADD" }}>✋ {s.hand_raises}</span>
+                )}
+                {s.phone_count > 0 && (
+                  <span style={{ fontSize: 10, color: "#E24B4A" }}>📱 {s.phone_count}</span>
+                )}
+                {s.sleep_count > 0 && (
+                  <span style={{ fontSize: 10, color: "#A32D2D" }}>💤 {s.sleep_count}</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function VideoSourceButton() {
   const [config, setConfig]       = useState({ video_mode: false, filename: null })
   const [uploading, setUploading] = useState(false)
@@ -192,7 +254,9 @@ function LiveTab({ sessionId }) {
         <StatCard label="Q-ratio" value={transcripts[0] ? transcripts[0].q_ratio : "—"} color="#EF9F27" sub="Teacher questions" />
       </div>
 
-      {timeline.length > 0 ? (
+      <StudentHeatmap sessionId={sessionId} />
+
+        {timeline.length > 0 ? (
         <div style={{ background: "#16213e", border: "1px solid #1a2a4a", borderRadius: 10, padding: "18px 20px" }}>
           <div style={{ fontSize: 12, color: "#888", marginBottom: 14, fontWeight: 600 }}>CLASS FOCUS SCORE OVER TIME</div>
           <ResponsiveContainer width="100%" height={200}>

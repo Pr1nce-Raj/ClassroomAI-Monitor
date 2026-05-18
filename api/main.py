@@ -224,6 +224,23 @@ def use_camera():
         json.dump(config, f)
     return {"status": "ok", "video_mode": False}
 
+@app.get("/session/{session_id}/heatmap")
+def get_heatmap(session_id: int):
+    """Returns latest focus score per distinct tracked student."""
+    return query("""
+        SELECT
+            track_id,
+            ROUND(AVG(focus_score), 1)  AS avg_focus,
+            MAX(timestamp)              AS last_seen,
+            SUM(hand_raised)            AS hand_raises,
+            SUM(phone_detected)         AS phone_count,
+            SUM(sleeping)               AS sleep_count
+        FROM events
+        WHERE session_id = ?
+          AND track_id != -1
+        GROUP BY track_id
+        ORDER BY track_id
+    """, (session_id,))
 
 # ── Static files & SPA ────────────────────────────────────────────
 
