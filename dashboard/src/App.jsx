@@ -104,7 +104,66 @@ function StudentHeatmap({ sessionId }) {
     </div>
   )
 }
+function PipelineButton() {
+  const [running, setRunning] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState(null)
 
+  useEffect(() => {
+    const poll = () =>
+      axios.get(`${API}/pipeline/status`)
+        .then(r => setRunning(r.data.running))
+        .catch(() => {})
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => clearInterval(id)
+  }, [])
+
+  const handleStop = async () => {
+    setLoading(true)
+    setMessage(null)
+    try {
+      const r = await axios.post(`${API}/pipeline/stop`)
+      setMessage(r.data.message)
+    } catch { setMessage("Failed to send stop signal") }
+    finally { setLoading(false) }
+  }
+
+  const handleStart = async () => {
+    setLoading(true)
+    setMessage(null)
+    try {
+      const r = await axios.post(`${API}/pipeline/start`)
+      setMessage(r.data.message)
+    } catch { setMessage("Failed to start pipeline") }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      {running ? (
+        <button onClick={handleStop} disabled={loading} style={{
+          background: "#E24B4A22", border: "1px solid #E24B4A",
+          color: loading ? "#555" : "#E24B4A", borderRadius: 8,
+          padding: "5px 14px", fontSize: 11, fontWeight: 600,
+          cursor: loading ? "not-allowed" : "pointer"
+        }}>
+          {loading ? "⏳ Stopping..." : "⏹ Stop Pipeline"}
+        </button>
+      ) : (
+        <button onClick={handleStart} disabled={loading} style={{
+          background: "#1D9E7522", border: "1px solid #1D9E75",
+          color: loading ? "#555" : "#1D9E75", borderRadius: 8,
+          padding: "5px 14px", fontSize: 11, fontWeight: 600,
+          cursor: loading ? "not-allowed" : "pointer"
+        }}>
+          {loading ? "⏳ Starting..." : "▶ Start Pipeline"}
+        </button>
+      )}
+      {message && <span style={{ fontSize: 10, color: "#888", maxWidth: 180 }}>{message}</span>}
+    </div>
+  )
+}
 function VideoSourceButton() {
   const [config, setConfig]       = useState({ video_mode: false, filename: null })
   const [uploading, setUploading] = useState(false)
@@ -529,6 +588,7 @@ export default function App() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <PipelineButton />
           <VideoSourceButton />
 
           {sessionId && (

@@ -13,6 +13,7 @@ from audio.listen    import run_audio_pipeline
 
 ROOT              = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VIDEO_CONFIG_PATH = os.path.join(ROOT, "video_config.json")
+STOP_FLAG_PATH    = os.path.join(ROOT, "stop_pipeline.flag")
 
 def load_video_config():
     try:
@@ -28,6 +29,10 @@ if VIDEO_MODE:
     print(f"[CONFIG] Video mode ON — source: {VIDEO_PATH}")
 else:
     print("[CONFIG] Live camera mode.")
+
+# Clean up any leftover stop flag from a previous run
+if os.path.exists(STOP_FLAG_PATH):
+    os.remove(STOP_FLAG_PATH)
 
 init_db()
 
@@ -68,6 +73,11 @@ if not cap.isOpened():
     print("ERROR: Could not open video source.")
     exit()
 
+# ── Fix 1: Resizable window with default size ──────────────────────
+WINDOW_NAME = "ClassroomAI Monitor — ByteHack 2026"
+cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+cv2.resizeWindow(WINDOW_NAME, 1024, 600)
+
 SOURCE_LABEL = "VIDEO" if VIDEO_MODE else "LIVE"
 print("Running. Press Q to quit. Press R to restart video (video mode only).")
 
@@ -100,6 +110,23 @@ def boxes_overlap(box1, box2, threshold=0.3):
 
 
 while True:
+    # ── Fix 2: Detect window X button close ───────────────────────
+    # getWindowProperty returns -1 if the window no longer exists
+    try:
+        visible = cv2.getWindowProperty(WINDOW_NAME, cv2.WND_PROP_VISIBLE)
+        if visible < 1:
+            print("Window closed — shutting down cleanly.")
+            break
+    except cv2.error:
+        print("Window closed — shutting down cleanly.")
+        break
+
+    # ── Fix 3: Check for stop flag written by FastAPI ─────────────
+    if os.path.exists(STOP_FLAG_PATH):
+        print("Stop signal received from dashboard — shutting down.")
+        os.remove(STOP_FLAG_PATH)
+        break
+
     ret, frame = cap.read()
 
     if not ret:
@@ -111,7 +138,6 @@ while True:
             print("Camera feed lost.")
             break
 
-    # Use ByteTrack for stable per-student IDs
     results = model.track(
         frame,
         classes=[0, 67],
@@ -123,8 +149,8 @@ while True:
     boxes = results[0].boxes
     now   = time.time()
 
-    person_boxes = []  # (x1, y1, x2, y2, track_id)
-    phone_boxes  = []  # (x1, y1, x2, y2)
+    person_boxes = []
+    phone_boxes  = []
 
     for box in boxes:
         cls    = int(box.cls[0])
@@ -222,9 +248,9 @@ while True:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 50), 1)
 
     src_color = (0, 165, 255) if VIDEO_MODE else (0, 220, 100)
-    cv2.putText(frame, f"● {SOURCE_LABEL}",
-                (frame.shape[1] - 100, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, src_color, 2)
+    cv2.putText(frame, f"● {SOURCE_LABEL}  |  Q = quit  R = restart video",
+                (10, frame.shape[0] - 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, src_color, 1)
 
     cv2.putText(
         frame,
@@ -233,15 +259,17 @@ while True:
         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1
     )
 
-    cv2.imshow("ByteHack - Classroom Monitor", frame)
+    cv2.imshow(WINDOW_NAME, frame)
 
     key = cv2.waitKey(1) & 0xFF
     if key == ord('q'):
+        print("Q pressed — shutting down.")
         break
     elif key == ord('r') and VIDEO_MODE:
         print("Restarting video...")
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
+# ── Cleanup ────────────────────────────────────────────────────────
 cap.release()
 cv2.destroyAllWindows()
 stop_audio.set()
@@ -251,3 +279,4 @@ active_path = os.path.join(ROOT, "active_session.txt")
 if os.path.exists(active_path):
     os.remove(active_path)
 end_session(session_id)
+print("Pipeline stopped cleanly.")

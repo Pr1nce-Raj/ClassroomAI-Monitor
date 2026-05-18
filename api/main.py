@@ -5,7 +5,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import sqlite3, json, shutil
+import sqlite3, json, shutil, subprocess
 from database.db import DB_PATH, get_session_summary
 from datetime import datetime
 
@@ -19,9 +19,10 @@ app.add_middleware(
 )
 
 # ── Path helpers ───────────────────────────────────────────────────
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT              = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VIDEO_CONFIG_PATH = os.path.join(ROOT, "video_config.json")
 UPLOADS_DIR       = os.path.join(ROOT, "uploaded_videos")
+STOP_FLAG_PATH    = os.path.join(ROOT, "stop_pipeline.flag")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 def query(sql, params=()):
@@ -179,11 +180,11 @@ def update_session(session_id: int, label: str, teacher: str):
     conn.close()
     return {"status": "updated"}
 
+
 # ── Video config endpoints ─────────────────────────────────────────
 
 @app.get("/video_config")
 def get_video_config():
-    """Returns current video mode setting so dashboard can show status."""
     try:
         with open(VIDEO_CONFIG_PATH, "r") as f:
             return json.load(f)
@@ -193,12 +194,6 @@ def get_video_config():
 
 @app.post("/video_config/upload")
 async def upload_video(file: UploadFile = File(...)):
-    """
-    Accepts a video file upload from the dashboard.
-    Saves it to uploaded_videos/ and writes video_config.json
-    so detect.py picks it up on next run.
-    """
-    # Sanitise filename
     safe_name = os.path.basename(file.filename).replace(" ", "_")
     save_path = os.path.join(UPLOADS_DIR, safe_name)
 
@@ -218,15 +213,16 @@ async def upload_video(file: UploadFile = File(...)):
 
 @app.post("/video_config/use_camera")
 def use_camera():
-    """Switch back to live webcam mode."""
     config = {"video_mode": False, "video_path": None, "filename": None}
     with open(VIDEO_CONFIG_PATH, "w") as f:
         json.dump(config, f)
     return {"status": "ok", "video_mode": False}
 
+
+# ── Heatmap endpoint ───────────────────────────────────────────────
+
 @app.get("/session/{session_id}/heatmap")
 def get_heatmap(session_id: int):
-    """Returns latest focus score per distinct tracked student."""
     return query("""
         SELECT
             track_id,
@@ -241,6 +237,57 @@ def get_heatmap(session_id: int):
         GROUP BY track_id
         ORDER BY track_id
     """, (session_id,))
+
+
+# ── Pipeline control endpoints ─────────────────────────────────────
+
+@app.post("/pipeline/stop")
+def stop_pipeline():
+    """
+    Writes a stop flag file that detect.py checks every frame.
+    detect.py sees the file, deletes it, and shuts down cleanly.
+    """
+    if not os.path.exists(os.path.join(ROOT, "active_session.txt")):
+        return {"status": "not_running", "message": "Pipeline is not running"}
+
+    with open(STOP_FLAG_PATH, "w") as f:
+        f.write("stop")
+
+    return {"status": "ok", "message": "Stop signal sent — pipeline will shut down shortly"}
+
+
+@app.post("/pipeline/start")
+def start_pipeline():
+    """
+    Launches vision/detect.py as a background subprocess using the venv Python.
+    Works whether called from START.bat or from the dashboard.
+    """
+    if os.path.exists(os.path.join(ROOT, "active_session.txt")):
+        return {"status": "already_running", "message": "Pipeline is already running"}
+
+    detect_script = os.path.join(ROOT, "vision", "detect.py")
+
+    # Use venv python on Windows
+    venv_python = os.path.join(ROOT, ".venv", "Scripts", "python.exe")
+    if not os.path.exists(venv_python):
+        # Fallback to system python
+        venv_python = sys.executable
+
+    subprocess.Popen(
+        [venv_python, detect_script],
+        cwd=ROOT,
+        creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+    )
+
+    return {"status": "ok", "message": "Pipeline starting — dashboard will update in a few seconds"}
+
+
+@app.get("/pipeline/status")
+def pipeline_status():
+    """Returns whether the vision pipeline is currently running."""
+    running = os.path.exists(os.path.join(ROOT, "active_session.txt"))
+    return {"running": running}
+
 
 # ── Static files & SPA ────────────────────────────────────────────
 
