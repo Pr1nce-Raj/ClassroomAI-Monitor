@@ -148,7 +148,7 @@ function PipelineButton() {
           padding: "5px 14px", fontSize: 11, fontWeight: 600,
           cursor: loading ? "not-allowed" : "pointer"
         }}>
-          {loading ? "⏳ Stopping..." : "⏹ Stop Pipeline"}
+          {loading ? "⏳ Stopping..." : "⏹ Stop Detection"}
         </button>
       ) : (
         <button onClick={handleStart} disabled={loading} style={{
@@ -157,7 +157,7 @@ function PipelineButton() {
           padding: "5px 14px", fontSize: 11, fontWeight: 600,
           cursor: loading ? "not-allowed" : "pointer"
         }}>
-          {loading ? "⏳ Starting..." : "▶ Start Pipeline"}
+          {loading ? "⏳ Starting..." : "▶ Start Detection"}
         </button>
       )}
       {message && <span style={{ fontSize: 10, color: "#888", maxWidth: 180 }}>{message}</span>}

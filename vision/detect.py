@@ -25,6 +25,12 @@ def load_video_config():
 
 VIDEO_MODE, VIDEO_PATH = load_video_config()
 
+# Fallback to camera if video file no longer exists
+if VIDEO_MODE and (not VIDEO_PATH or not os.path.exists(VIDEO_PATH)):
+    print(f"[CONFIG] Video file not found — falling back to webcam.")
+    VIDEO_MODE = False
+    VIDEO_PATH = None
+
 if VIDEO_MODE:
     print(f"[CONFIG] Video mode ON — source: {VIDEO_PATH}")
 else:
