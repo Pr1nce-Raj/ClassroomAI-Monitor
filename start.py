@@ -43,11 +43,10 @@ def main():
 
     # Start FastAPI (serves both API and dashboard)
     api_proc = subprocess.Popen([
-        sys.executable, "-m", "uvicorn",
-        "api.main:app",
-        "--host", "0.0.0.0",   # 0.0.0.0 = accessible on WiFi
-        "--port", "8000",
-        "--reload"
+    sys.executable, "-m", "uvicorn",
+    "api.main:app",
+    "--host", "0.0.0.0",
+    "--port", "8000"
     ])
 
     # Wait for API to start
