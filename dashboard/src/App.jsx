@@ -37,6 +37,28 @@ const formatDuration = (startTs) => {
   return `${h}:${m}:${s}`
 }
 
+const formatClock = (ts) => {
+  if (!ts) return ""
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return String(ts).slice(11, 16)
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+}
+
+const formatDateTime = (ts) => {
+  if (!ts) return ""
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return String(ts).slice(0, 19).replace("T", " ")
+  return d.toLocaleString()
+}
+
+const buildTimeline = (rows) =>
+  rows.map((r, i) => ({
+    snapshot: i + 1,
+    focus: r.avg_focus,
+    timestamp: r.timestamp,
+    tick: formatClock(r.timestamp),
+  }))
+
 function StatCard({ label, value, sub, color }) {
   return (
     <div style={{
@@ -207,10 +229,22 @@ function StudentHeatmap({ sessionId }) {
               <div style={{ fontSize: 22, fontWeight: 700, color }}>
                 {s.avg_focus ?? "—"}%
               </div>
-              <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                {s.hand_raises > 0 && <span style={{ fontSize: 10, color: "#378ADD" }}>✋ {s.hand_raises}</span>}
-                {s.phone_count > 0 && <span style={{ fontSize: 10, color: "#E24B4A" }}>📱 {s.phone_count}</span>}
-                {s.sleep_count > 0 && <span style={{ fontSize: 10, color: "#A32D2D" }}>💤 {s.sleep_count}</span>}
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  {s.hand_raises > 0 && (
+                    <span style={{ fontSize: 13, color: "#378ADD", fontWeight: 600 }}>
+                    ✋{s.hand_raises}
+                    </span>
+                  )}
+                  {s.phone_count > 0 && (
+                    <span style={{ fontSize: 13, color: "#E24B4A", fontWeight: 600 }}>
+                    📱 {s.phone_count}
+                    </span>
+                  )}
+                  {s.sleep_count > 0 && (
+                    <span style={{ fontSize: 13, color: "#A32D2D", fontWeight: 600 }}>
+                    💤 {s.sleep_count}
+                    </span>
+                  )}
               </div>
             </div>
           )
@@ -359,12 +393,12 @@ function VideoSourceButton() {
   const fileRef = useRef()
 
   useEffect(() => {
-    const fetch = () =>
+    const fetchConfig = () =>
       axios.get(`${API}/video_config`)
         .then(r => setConfig(r.data))
         .catch(() => {})
-    fetch()
-    const id = setInterval(fetch, 5000)
+    fetchConfig()
+    const id = setInterval(fetchConfig, 5000)
     return () => clearInterval(id)
   }, [])
 
@@ -492,7 +526,7 @@ function LiveTab({ sessionId, showSeatGrid }) {
         setLive(liveR.data)
         setAlerts(alR.data.slice(0, 20))
         setTrans(trR.data.slice(0, 5))
-        setTimeline(tlR.data.map((r, i) => ({ t: i + 1, focus: r.avg_focus })))
+        setTimeline(buildTimeline(tlR.data))
       } catch (e) {}
     }
 
@@ -538,15 +572,39 @@ function LiveTab({ sessionId, showSeatGrid }) {
 
       {timeline.length > 0 ? (
         <div style={cardStyle}>
-          <div style={{ fontSize: 12, color: "#888", marginBottom: 14, fontWeight: 600 }}>
-            CLASS FOCUS SCORE OVER TIME
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, color: "#888", fontWeight: 600 }}>
+              CLASS FOCUS SCORE OVER TIME
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Badge text={`${timeline.length} snapshots`} color="#7F77DD" />
+              <Badge text="1 point = 5 seconds" color="#378ADD" />
+            </div>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
+          <ResponsiveContainer width="100%" height={240}>
             <LineChart data={timeline}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2a4a" />
-              <XAxis dataKey="t" stroke="#333" tick={{ fill: "#555", fontSize: 10 }} />
+              <XAxis
+                dataKey="snapshot"
+                stroke="#333"
+                interval="preserveStartEnd"
+                tickFormatter={(value, index) => {
+                  const point = timeline[index]
+                  if (!point) return value
+                  const every = Math.max(1, Math.ceil(timeline.length / 8))
+                  return index % every === 0 || index === timeline.length - 1 ? point.tick : ""
+                }}
+                tick={{ fill: "#555", fontSize: 10 }}
+              />
               <YAxis domain={[0, 100]} stroke="#333" tick={{ fill: "#555", fontSize: 10 }} />
-              <Tooltip contentStyle={{ background: "#0f0f1a", border: "1px solid #333", borderRadius: 6, fontSize: 12 }} />
+              <Tooltip
+                contentStyle={{ background: "#0f0f1a", border: "1px solid #333", borderRadius: 6, fontSize: 12 }}
+                formatter={(value) => [`${value}%`, "Class focus"]}
+                labelFormatter={(label, payload) => {
+                  const p = payload?.[0]?.payload
+                  return p ? `Snapshot ${p.snapshot} • ${formatDateTime(p.timestamp)}` : `Snapshot ${label}`
+                }}
+              />
               <ReferenceLine y={70} stroke="#1D9E7544" strokeDasharray="4 4" />
               <ReferenceLine y={40} stroke="#E24B4A44" strokeDasharray="4 4" />
               <Line type="monotone" dataKey="focus" stroke="#1D9E75" strokeWidth={2} dot={{ r: 3, fill: "#1D9E75" }} activeDot={{ r: 5 }} />
@@ -631,12 +689,12 @@ function AnalysisTab() {
   const [allEvents, setAllEvents] = useState([])
   const [transcripts, setTrans] = useState([])
   const [filter, setFilter] = useState("all")
+  const [searchText, setSearchText] = useState("")
 
   useEffect(() => {
-    axios.get(`${API}/sessions/all`).then(r => setSessions(r.data))
-    const id = setInterval(() => {
-      axios.get(`${API}/sessions/all`).then(r => setSessions(r.data))
-    }, 5000)
+    const load = () => axios.get(`${API}/sessions/all`).then(r => setSessions(r.data))
+    load()
+    const id = setInterval(load, 5000)
     return () => clearInterval(id)
   }, [])
 
@@ -649,11 +707,23 @@ function AnalysisTab() {
       axios.get(`${API}/session/${selected}/transcripts`),
     ]).then(([s, tl, ev, tr]) => {
       setSummary(s.data)
-      setTimeline(tl.data.map((r, i) => ({ t: i + 1, focus: r.avg_focus })))
+      setTimeline(buildTimeline(tl.data))
       setAllEvents([...ev.data].reverse())
       setTrans(tr.data)
     })
   }, [selected])
+
+  const filteredSessions = sessions.filter(s =>
+    `${s.label} ${s.started_at}`.toLowerCase().includes(searchText.toLowerCase())
+  )
+  const topMatches = searchText.trim() ? filteredSessions.slice(0, 6) : []
+
+  useEffect(() => {
+  if (!searchText.trim()) return
+  if (filteredSessions.length === 1) {
+    setSelected(filteredSessions[0].id)
+  }
+}, [searchText, filteredSessions])
 
   const filteredEvents = allEvents.filter(e => {
     if (filter === "alerts") return e.hand_raised || e.sleeping || e.phone_detected
@@ -668,6 +738,55 @@ function AnalysisTab() {
         <div style={{ fontSize: 12, color: "#888", marginBottom: 10, fontWeight: 600 }}>
           SELECT SESSION
         </div>
+
+        <input
+          value={searchText}
+          onChange={e => setSearchText(e.target.value)}
+          placeholder="Search by professor, course, class, or date..."
+          style={{
+            background: "#0f0f1a",
+            color: "#ccc",
+            border: "1px solid #2a2a4a",
+            borderRadius: 6,
+            padding: "8px 12px",
+            fontSize: 13,
+            width: "100%",
+            marginBottom: 10,
+            outline: "none"
+          }}
+        />
+
+        {searchText.trim() && topMatches.length > 0 && (
+  <div style={{
+    background: "#0f0f1a",
+    border: "1px solid #2a2a4a",
+    borderRadius: 8,
+    marginBottom: 10,
+    overflow: "hidden"
+  }}>
+    {topMatches.map(s => (
+      <button
+        key={s.id}
+        onClick={() => setSelected(s.id)}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left",
+          background: selected === s.id ? "#1D9E7522" : "transparent",
+          color: selected === s.id ? "#fff" : "#ccc",
+          border: "none",
+          borderBottom: "1px solid #1a2a4a",
+          padding: "10px 12px",
+          fontSize: 12,
+          cursor: "pointer"
+        }}
+      >
+        Session {s.id} · {s.label} · {s.started_at.slice(0, 16).replace("T", " ")}
+      </button>
+    ))}
+  </div>
+)}
+
         <select
           value={selected ?? ""}
           onChange={e => setSelected(Number(e.target.value))}
@@ -683,34 +802,64 @@ function AnalysisTab() {
           }}
         >
           <option value="">— choose a session —</option>
-          {sessions.map(s => (
+          {filteredSessions.map(s => (
             <option key={s.id} value={s.id}>
               Session {s.id} · {s.label} · {s.started_at.slice(0, 16).replace("T", " ")}
             </option>
           ))}
         </select>
+
+        {searchText && (
+          <div style={{ marginTop: 8, fontSize: 11, color: "#666" }}>
+            {filteredSessions.length} matching session(s)
+          </div>
+        )}
       </div>
 
       {summary && (
         <>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             <StatCard label="Avg class focus" value={`${summary.avg_focus}%`} color={focusColor(summary.avg_focus)} sub="Full session avg" />
-            <StatCard label="Snapshots" value={summary.total_events} color="#7F77DD" sub="Every 5 seconds" />
+            <StatCard label="Snapshots" value={timeline.length} color="#7F77DD" sub="Every 5 seconds" />
             <StatCard label="Hand raises" value={summary.total_hand_raises} color="#378ADD" sub="Total" />
             <StatCard label="Sleeping alerts" value={summary.total_sleeping} color="#A32D2D" sub="Total" />
           </div>
 
           {timeline.length > 0 && (
             <div style={cardStyle}>
-              <div style={{ fontSize: 12, color: "#888", marginBottom: 14, fontWeight: 600 }}>
-                CLASS FOCUS TIMELINE
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: "#888", fontWeight: 600 }}>
+                  CLASS FOCUS TIMELINE
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Badge text={`${timeline.length} snapshots`} color="#7F77DD" />
+                  <Badge text="1 point = 5 seconds" color="#378ADD" />
+                </div>
               </div>
-              <ResponsiveContainer width="100%" height={220}>
+              <ResponsiveContainer width="100%" height={240}>
                 <LineChart data={timeline}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1a2a4a" />
-                  <XAxis dataKey="t" stroke="#333" tick={{ fill: "#555", fontSize: 10 }} />
+                  <XAxis
+                    dataKey="snapshot"
+                    stroke="#333"
+                    interval="preserveStartEnd"
+                    tickFormatter={(value, index) => {
+                      const point = timeline[index]
+                      if (!point) return value
+                      const every = Math.max(1, Math.ceil(timeline.length / 8))
+                      return index % every === 0 || index === timeline.length - 1 ? point.tick : ""
+                    }}
+                    tick={{ fill: "#555", fontSize: 10 }}
+                  />
                   <YAxis domain={[0, 100]} stroke="#333" tick={{ fill: "#555", fontSize: 10 }} />
-                  <Tooltip contentStyle={{ background: "#0f0f1a", border: "1px solid #333", borderRadius: 6, fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{ background: "#0f0f1a", border: "1px solid #333", borderRadius: 6, fontSize: 12 }}
+                    formatter={(value) => [`${value}%`, "Class focus"]}
+                    labelFormatter={(label, payload) => {
+                      const p = payload?.[0]?.payload
+                      return p ? `Snapshot ${p.snapshot} • ${formatDateTime(p.timestamp)}` : `Snapshot ${label}`
+                    }}
+                  />
                   <ReferenceLine y={70} stroke="#1D9E7544" strokeDasharray="4 4" label={{ value: "Good", fill: "#1D9E7566", fontSize: 10 }} />
                   <ReferenceLine y={40} stroke="#E24B4A44" strokeDasharray="4 4" label={{ value: "Low", fill: "#E24B4A66", fontSize: 10 }} />
                   <Line type="monotone" dataKey="focus" stroke="#1D9E75" strokeWidth={2} dot={{ r: 3, fill: "#1D9E75" }} />

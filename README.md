@@ -6,12 +6,14 @@
 
 - 📷 Detects students via YOLOv8 object detection
 - 🧠 Calculates Focus Score using head pose estimation (MediaPipe)
-- 🙋 Detects hand raises and sleeping via pose estimation  
+- 🙋 Detects hand raises and sleeping via pose estimation
 - 📱 Detects phone usage and penalizes focus score
 - 🎙️ Transcribes teacher speech every 30 seconds (OpenAI Whisper)
 - 📊 Shows everything on a live React dashboard
 - 📡 Anyone on the same WiFi can open the dashboard on their phone
 - 🎬 Supports both live webcam tracking and pre-recorded video uploads directly from the dashboard
+- ▶️ Start and stop the pipeline from the dashboard
+- 📚 Review past sessions in the Session Analysis tab
 
 ## Tech Stack
 
@@ -36,33 +38,40 @@
 ## Setup (First Time Only)
 
 1. Clone the repo:
-```
+
+```bash
 git clone https://github.com/Pr1nce-Raj/ClassroomAI-Monitor.git
 cd ClassroomAI-Monitor
 ```
 
 2. Double-click `setup.bat` and wait for it to finish (5-10 minutes)
 
-That's it. Setup only needs to be done once.
+That’s it. Setup only needs to be done once.
 
 ## Running the System
 
-**Live Session (Camera Required)**
-Double-click `START.bat`
-* Starts the AI vision pipeline and live dashboard.
-* Open your browser and go to: `http://localhost:8000`
-* To share with others on the same WiFi, use the IP link printed in the terminal.
+### Live Session (Camera Required)
 
-**Session Analysis (Offline Mode)**
+Double-click `START.bat`
+
+- Starts the AI vision pipeline and live dashboard.
+- Automatically opens the dashboard in your browser.
+- You can also open `http://localhost:8000` manually if needed.
+- To share with others on the same WiFi, use the IP link printed in the terminal.
+
+### Session Analysis (Offline Mode)
+
 Double-click `DASHBOARD.bat`
-* Starts only the backend and dashboard to view past session data. No camera or AI pipeline runs.
-* Open your browser and navigate to the **Session Analysis** tab.
+
+- Starts only the backend and dashboard to view past session data.
+- No camera or AI pipeline runs.
+- Open the **Session Analysis** tab.
 
 ## Demo Guide
 
 | Action | What Happens |
 |---|---|
-| **Click "Upload Video"** | Switches pipeline from live webcam to pre-recorded video file |
+| Click "Upload Video" | Switches pipeline from live webcam to pre-recorded video file |
 | Look at camera | Focus score goes up (green) |
 | Look away | Focus score drops (red) |
 | Raise hand | HAND RAISED alert on dashboard |
@@ -72,10 +81,11 @@ Double-click `DASHBOARD.bat`
 
 ## Privacy
 
-All processing happens on-device. Raw video never leaves the machine. Only numerical scores are stored in the database. Face blur mode available via `PRIVACY_MODE = True` in `vision/detect.py`.
+All processing happens on-device. Raw video never leaves the machine. Only numerical scores are stored in the database. Face blur mode is available via `PRIVACY_MODE = True` in `vision/detect.py`.
 
 ## Project Structure
-```
+
+```text
 ByteHack_AI/
 ├── vision/          ← Camera, YOLO, focus score, pose detection
 ├── audio/           ← Whisper transcription
@@ -88,6 +98,17 @@ ByteHack_AI/
 └── DASHBOARD.bat    ← View past sessions (no camera needed)
 ```
 
+## Demo Video
+
+[Watch on YouTube](https://youtu.be/iMEtkknZpuI)
+
 ## Screenshots
 
-> Dashboard screenshots and demo video coming soon.
+### Live Dashboard
+![Live Dashboard](screenshots/live-dashboard.png)
+
+### Seat Heatmap
+![Seat Heatmap](screenshots/seat-heatmap.png)
+
+### Session Analysis
+![Session Analysis](screenshots/session-analysis.png)
